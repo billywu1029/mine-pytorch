@@ -212,6 +212,5 @@ class GAN(pl.LightningModule):
         plt.figure()
         plt.imshow(generated[0].cpu().data.numpy())
 
-    @pl.data_loader
     def train_dataloader(self):
         return self.train_loader
