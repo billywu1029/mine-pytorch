@@ -61,12 +61,14 @@ def ema_loss(x, running_mean, alpha):
 
 
 class Mine(nn.Module):
-    def __init__(self, T, loss='mine', alpha=0.01, method=None):
+    def __init__(self, T, loss='mine', alpha=0.01, method=None, lam=0.1, C=0):
         super().__init__()
         self.running_mean = 0
         self.loss = loss
         self.alpha = alpha
         self.method = method
+        self.lam = lam
+        self.C = C
 
         if method == 'concat':
             if isinstance(T, nn.Sequential):
@@ -78,6 +80,7 @@ class Mine(nn.Module):
 
     def forward(self, x, z, z_marg=None):
         if z_marg is None:
+            print("using z_marg random perm")
             z_marg = z[torch.randperm(x.shape[0])]
 
         t = self.T(x, z).mean()
@@ -92,7 +95,7 @@ class Mine(nn.Module):
             second_term = torch.logsumexp(
                 t_marg, 0) - math.log(t_marg.shape[0])
 
-        return -t + second_term
+        return -t + second_term + self.lam * (second_term - self.C) ** 2
 
     def mi(self, x, z, z_marg=None):
         if isinstance(x, np.ndarray):
@@ -124,6 +127,7 @@ class Mine(nn.Module):
 
         final_mi = self.mi(X, Y)
         print(f"Final MI: {final_mi}")
+        self.final_mi = final_mi
         return final_mi
 
 
@@ -149,9 +153,11 @@ class MutualInformationEstimator(pl.LightningModule):
         self.T = CustomSequential(ConcatLayer(), nn.Linear(x_dim + z_dim, 100), nn.ReLU(),
                                   nn.Linear(100, 100), nn.ReLU(), nn.Linear(100, 1))
 
-        self.energy_loss = Mine(self.T, loss=loss, alpha=kwargs['alpha'])
+        self.energy_loss = kwargs.get('mine', Mine(self.T, loss=loss, alpha=kwargs['alpha']))
+        print(self.energy_loss)
 
         self.kwargs = kwargs
+        self.gradient_batch_size = kwargs.get('gradient_batch_size', 1)
 
         self.train_loader = kwargs.get('train_loader')
         self.test_loader = kwargs.get('test_loader')
@@ -167,8 +173,11 @@ class MutualInformationEstimator(pl.LightningModule):
         return torch.optim.Adam(self.parameters(), lr=self.kwargs['lr'])
 
     def training_step(self, batch, batch_idx):
-
         x, z = batch
+        # This shows that each batch is just the minibatch in MINE, and also the same
+        # as a "batch" from a dataloader, ie using our value of 'K'
+        # print(f"batch_idx: {batch_idx}")
+        # print(x.shape, z.shape)
 
         if self.on_gpu:
             x = x.cuda()
@@ -178,43 +187,76 @@ class MutualInformationEstimator(pl.LightningModule):
         mi = -loss
         tensorboard_logs = {'loss': loss, 'mi': mi}
         tqdm_dict = {'loss_tqdm': loss, 'mi': mi}
+        self.last_mi = mi
+        self.logger.experiment.add_scalar(
+            f"MI Train | {self.kwargs['func']}, N={self.kwargs.get('N', 'conv mnist')}, batch_size={self.kwargs['batch_size']}, hidden=1",
+            mi,
+            self.current_epoch
+        )
+        self.logger.log_metrics(tensorboard_logs, self.current_epoch)
 
         return {
             **tensorboard_logs, 'log': tensorboard_logs, 'progress_bar': tqdm_dict
         }
+        
+    def optimizer_step(self, epoch: int, batch_idx: int, optimizer, optimizer_idx: int = 0, optimizer_closure = None, on_tpu: bool = False, using_native_amp: bool = False, using_lbfgs: bool = False):
+        convMINEzconv1 = next(self.energy_loss.T.fc1.parameters())
+        if batch_idx % self.gradient_batch_size == 0:
+            # print(f"epoch {epoch} batch_idx {batch_idx} applying optimizer step")
+            optimizer.step(closure=optimizer_closure)
+        else:
+            # print(f"skipping optimizer step for epoch {epoch} batch_idx {batch_idx}")
+            optimizer_closure()
+
+        # print("zconv1 stats optimizer_step()")
+        # print(f"zconv1 grad: {convMINEzconv1.grad}")
+        # print(f"mean: {torch.mean(convMINEzconv1)}, max: {torch.max(convMINEzconv1)}, min: {torch.min(convMINEzconv1)}")
+
+    def optimizer_zero_grad(self, epoch: int, batch_idx: int, optimizer, optimizer_idx: int):
+        convMINEzconv1 = next(self.energy_loss.T.fc1.parameters())
+        if batch_idx % self.gradient_batch_size == 0:
+            # print(f"epoch {epoch} batch_idx {batch_idx} applying zero grad")
+            optimizer.zero_grad()
+        else:
+            pass
+            # print(f"skipping zero grad for epoch {epoch} batch_idx {batch_idx}")
+
+        # print("zconv1 stats optimizer_zero_grad()")
+        # print(f"zconv1 grad: {convMINEzconv1.grad}")
+        # print(f"mean: {torch.mean(convMINEzconv1)}, max: {torch.max(convMINEzconv1)}, min: {torch.min(convMINEzconv1)}")
 
     def test_step(self, batch, batch_idx):
         x, z = batch
         loss = self.energy_loss(x, z)
-
         return {
             'test_loss': loss, 'test_mi': -loss
         }
 
-    def test_end(self, outputs):
+    def test_epoch_end(self, outputs):
         avg_mi = torch.stack([x['test_mi']
                               for x in outputs]).mean().detach().cpu().numpy()
+        print("avg_mi: ", avg_mi)
         tensorboard_logs = {'test_mi': avg_mi}
-
         self.avg_test_mi = avg_mi
+
         return {'avg_test_mi': avg_mi, 'log': tensorboard_logs}
 
-    @pl.data_loader
     def train_dataloader(self):
         if self.train_loader:
             return self.train_loader
 
+        print("nooo wrong train loader")
         train_loader = torch.utils.data.DataLoader(
             FunctionDataset(self.kwargs['N'], self.x_dim,
                             self.kwargs['sigma'], self.kwargs['f']),
             batch_size=self.kwargs['batch_size'], shuffle=True)
         return train_loader
 
-    @pl.data_loader
     def test_dataloader(self):
         if self.test_loader:
             return self.train_loader
 
+        print("nooo wrong test loader")
         test_loader = torch.utils.data.DataLoader(
             FunctionDataset(self.kwargs['N'], self.x_dim,
                             self.kwargs['sigma'], self.kwargs['f']),
