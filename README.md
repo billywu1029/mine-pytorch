@@ -1,3 +1,21 @@
+Most Relevant Literature for MEng Thesis '22:
+
+[MINE Paper](https://arxiv.org/pdf/1801.04062.pdf): Mutual Information Neural Estimation. The basis of this github.
+
+[ReMINE Paper](https://openreview.net/pdf?id=Lvb2BKqL49a): Regularized MINE, aimed at resolving the numerical stability issues experienced with MINE.
+
+[Variational Bounds on MI Colab, Paper, and Presentation](https://colab.research.google.com/github/google-research/google-research/blob/master/vbmi/vbmi_demo.ipynb): Important background on the various state-of-the-art MI estimators and how they compare. Has tons of valuable wisdom for anyone seeking to use MI estimation as a core component of their work.
+
+[MIGE Paper](https://arxiv.org/abs/2005.01123): The future of MI estimation's application in deep learning (in my opinion). MI itself is too difficult to directly estimate, but estimating the gradients is potentially faster and numerically more stable, which could be crucial to driving improvements and adoption.
+
+[Limitations on Measuring MI Paper](https://arxiv.org/abs/1811.04251): Theoretical bounds on what MI estimators can achieve, given experimental setup.
+
+[SMILE Github and Paper](https://github.com/ermongroup/smile-mi-estimator): Alternative recent MI estimator, worse performance on Gaussian dataset, according to ReMINE authors.
+
+[Neuracrypt Paper](https://arxiv.org/abs/2106.02484): The basis of my work, encoder family of functions with private weights to ensure privacy against adversarial attack, while keeping utility for downstream tasks.
+
+-----------------------------------------
+
 # Mutual Information Neural Estimation
 
 ## Why is this cool
