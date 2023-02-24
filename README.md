@@ -44,10 +44,70 @@ Some of the code uses Pytorch Lightning [4] for training and evaluation.
 This repo contains a Pytorch implementation of MINE and a reconstruction of most of the experiments
 Currently this includes:
 
-1. 
+1. Comparing MINE to non-parametric estimation
+2. Capturing non-linear dependencies
+3. Maximizing mutual information to improve GANs
+
+- [x] Spiral dataset
+- [x] 25 Gaussians
+- [ ] Stacked MNIST
+
+4. Improving Bi-directional adversarial models
+
+- [x] 25 Gaussians
+
+5. Information bottleneck
+
+- [x] Permutation invariant MNIST
+- [ ] Reconstructing results from Tishby et al. (2016)
+
+The implemented experiments can be found in the `All Experiments.ipynb` notebook. 
+
+## Usage
+
+MINE relies on a statistics network `T` which takes as input two variables X, Y and estimates the mutual information MI(X,Y).
+
+```python
+from mine.models.mine import Mine
+statistics_network = nn.Sequential(
+    nn.Linear(x_dim + y_dim, 100),
+    nn.ReLU(),
+    nn.Linear(100, 100),
+    nn.ReLU(),
+    nn.Linear(100, 1)
+)
+
+mine = Mine(
+    T = statistics_network,
+    loss = 'mine' #mine_biased, fdiv
+    method = 'concat'
+)
+
+joint_samples = np.random.multivariate_normal(mu = np.array([0,0]), cov = np.array([[1, 0.2], [0.2, 1]]))
+
+X, Y = joint_samples[:, 0], joint_samples[:, 1]
+
+mi = mine.optimize(X, Y, iters = 100)
+```
 
 ## Results
+### Mutual Information between normal random variables
+We estimate the MI for two normal distributed random variables with varying correlation. 
 
+![MI](figures/mi_estimation.png)
+
+### MINE + GAN
+We combine MINE with Generative Adversarial Networks by adding a regularization term to the GAN value function which measures the mutual information between the generated samples and the image labels.
+The generator also receives as input the concatenation of random noise Z and one-hot encoded label c. 
+
+<img src="https://render.githubusercontent.com/render/math?math=min_G max_D V(D,G) = E_{P_X}[D(X)] %2B E_{P_Z}[\log(1 - D(G(Z))] - \beta I(G([\varepsilon, c]);c)">
+
+Note that the distribution of the generated samples is much closer to the true distribution than that of a normal GAN. However, the labels do not coincide with the true labels. By maximizing mutual information between
+samples and labels, we ensure that generated samples from the same class will stick together in the sample space. There is however no objective that ensures that random noise z together with class label c is mapped to the same class in the data distribution, the discriminator can only determine if it is in the distribution at all. 
+
+![25 Gaussians](figures/25gaussians.png)
+![25 Gaussians](figures/25gaussians_gan.png)
+![25 Gaussians](figures/25gaussians_mine.png)
 
 
 ### References
